@@ -1,10 +1,15 @@
 #!/bin/bash
 
+# ONLINE MODE VARS
 SERVER=`hostname`
 NS_CONFIG_PATH="/etc/sysconfig/network-scripts/"
-#NS_CONFIG_PATH="/root/develop/network-script/$SERVER/tmp/network_backup_20250712_091735/network-scripts/network-scripts/"
 NS_NEW_CONFIG_PATH="/root/$SERVER/new_config/"
 
+# OFFLINE MODE VARS
+NS_CONFIG_PREFIX=$1
+NS_CONFIG_SUFFIX="tmp/network_backup_20250712_091735/network-scripts/network-scripts/"
+
+# COMMON VARS
 NS_SOURCE="ProfileAA/"
 NS_CONFIG1="ProfileBA/"
 NS_CONFIG2="ProfileBB/"
@@ -21,6 +26,8 @@ declare -a NS_SRC_STANDBY_NIC_LIST
 declare -a NS_SRC_ACTIVE_NIC_LIST
 declare -a NS_CONFIG_ACTIVE_NIC_LIST
 declare -a NS_CONFIG_STANDBY_NIC_LIST
+MODE=""                                         #New add at 22-Jul-2025 for online/offline mode
+UP_NIC_LIST=""                                  #New add at 22-Jul-2025 for check_nic_status of offline mode=
 
 get_bond_list() {
     local config_path="$1"
@@ -62,18 +69,44 @@ get_active_nic_from_bond() {
     echo "$active_nic"
 }
 
+##### New add at 22-July-2025,
+# if nic in used return true.
+check_nic_status()
+{
+    local nic=$1
+
+    if [[ $MODE == "online" ]]; then
+        if ip address show $nic | grep -iq "master bond*" ; then
+            return 0
+    	else
+	        return 1
+    	fi
+
+    elif [[ $MODE == "offline" ]]; then
+        if grep -i $nic $UP_NIC_LIST ; then
+            return 0
+        else
+            return 1
+        fi	
+        
+    else
+            return 1
+    fi
+}
+#####
+
 set_new_nic() {
     local nic="$1"
     local new_nic=""
 
-    # Case 1: Simple eno-style, e.g., eno1 → eno2
+    # Case 1: Onboard NIC, e.g., eno1 -> eno2
     if [[ ${nic%%[0-9]*} == "eno" ]]; then
         local num=${nic//[!0-9]/}
         local new_num=$((num + 1))
         local prefix=${nic%%[0-9]*}
         new_nic="${prefix}${new_num}"
 
-    # Case 2: Complex pattern, e.g., ens1f0np0 → ens1f1np1
+    # Case 2: PCI NIC, e.g., ens1f0np0 -> ens1f1np1
     elif [[ $nic =~ ^(.*f)([0-9]+)(np)([0-9]+)$ ]]; then
         local prefix_f="${BASH_REMATCH[1]}"
         local num_f="${BASH_REMATCH[2]}"
@@ -84,6 +117,8 @@ set_new_nic() {
         local new_np=$((num_np + 1))
 
         new_nic="${prefix_f}${new_f}${np}${new_np}"
+
+    # Case 3: Test ENV VM NIC on Linux e.g. ens192 -> ens 161; ens224 -> ens256
     elif [[ ${nic%%[0-9]*} == "ens" ]]; then
         echo "in loop $nic" >> debug.txt
         if [[ $nic == "ens192" ]]; then
@@ -145,19 +180,54 @@ set_env_file() {
 
 }
 
+# Determine ONLINE/OFFLINE Mode. Modify date 22-Jul-2025
+if [ ! -z "$1" ]; then
+    if [ -d "$1" ]; then
+	NS_CONFIG_PATH="$NS_CONFIG_PREFIX""$NS_CONFIG_SUFFIX"
+        NS_NEW_CONFIG_PATH="$NS_CONFIG_PREFIX""new_config/"
 
-# Create NS_Profile
+	if grep -iq "TYPE=Bond" "$NS_CONFIG_PATH""ifcfg-bond"* 2>/dev/null; then
+            if [ -z "$2" ]; then
+                echo "No ip addr list file for verifying"
+                exit 1
+            fi
+            
+            # Global variable for function call.
+            MODE="offline"                              
+            echo "Script execute in OFFLINE mode!"
+            echo "Config File Path : ${NS_CONFIG_PATH}"
+	    
+	    UP_NIC_LIST="${NS_CONFIG_PREFIX}/up_nic.txt"
+ 	    grep -i "master bond" $2 > $UP_NIC_LIST
+	    cat $UP_NIC_LIST
+
+        else 
+            echo "No bonding configure file under this directory!"
+            exit 1
+        fi
+    else
+        echo "$1 isn't exist!"
+            exit 1
+    fi
+else
+        echo "Script execute in ONLINE mode!"
+        echo "Config File Path : ${NS_CONFIG_PATH}"
+        MODE="online"
+fi
+
+# Create NS_Profile folder
 if [ ! -d "$NS_NEW_CONFIG_PATH" ]; then
     mkdir -p "$NS_NEW_CONFIG_PATH"
+else 
+    echo "The folder exists! Please clean up the folder to avoid overwrite actions."
+    exit 1
 fi
 
 APPROACH_AA_PATH="$NS_NEW_CONFIG_PATH""$NS_SOURCE"
 cp -Rp "$NS_CONFIG_PATH" "$APPROACH_AA_PATH"
 
-
 APPROACH_BA_PATH="$NS_NEW_CONFIG_PATH""$NS_CONFIG1"
 cp -Rp "$NS_CONFIG_PATH" "$APPROACH_BA_PATH"
-
 
 APPROACH_BB_PATH="$NS_NEW_CONFIG_PATH""$NS_CONFIG2"
 cp -Rp "$NS_CONFIG_PATH" "$APPROACH_BB_PATH"
@@ -166,20 +236,27 @@ cp -Rp "$NS_CONFIG_PATH" "$APPROACH_BB_PATH"
 MAIN_COPY_PATH=$APPROACH_AA_PATH
 
 read -r -a  NS_BOND_LIST <<< "$(get_bond_list $MAIN_COPY_PATH)"
-#echo "# of BOND : ${#NS_BOND_LIST[@]}"
-
+#echo "# of BOND : ${#NS_BOND_LIST[@]}"                         #Debug use
 
 # Create Approach BB NS_Profile
 for bond in "${NS_BOND_LIST[@]}"; do
     	read -r -a  NS_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
-	#echo "# of NIC : ${#NS_BOND_NIC[@]}"
+	#echo "# of NIC : ${#NS_BOND_NIC[@]}"                       #Debug use
     	for nic in "${NS_BOND_NIC[@]}"; do
 	
 		if grep -q "primary=$nic" "$NS_CONFIG_PATH""ifcfg-$bond" 2> /dev/null ; then
-			NS_SRC_ACTIVE_NIC=$nic
+			
+            NS_SRC_ACTIVE_NIC=$nic
 			NS_CONFIG_ACTIVE_NIC="$(set_new_nic $nic)"
-
-			set_ifcfg_eth_file $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
+            
+            ##### add at 22-July-2025
+            while check_nic_status $NS_CONFIG_ACTIVE_NIC ; do
+                    NS_CONFIG_ACTIVE_NIC="$(set_new_nic $NS_CONFIG_ACTIVE_NIC)"
+            # echo "in loop : ${NS_CONFIG_ACTIVE_NIC}"          # Debug use
+            done
+            #####
+			
+            set_ifcfg_eth_file $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 			set_ifcfg_bond_file $bond $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 			
 			echo "Active NIC : $nic"
@@ -191,7 +268,13 @@ for bond in "${NS_BOND_LIST[@]}"; do
 			NS_SRC_STANDBY_NIC=$nic
 			NS_CONFIG_STANDBY_NIC="$(set_new_nic $nic)"
 
-			set_ifcfg_eth_file $NS_SRC_STANDBY_NIC $NS_CONFIG_STANDBY_NIC $APPROACH_BB_PATH
+		    ##### add at 22-July-2025
+		    while check_nic_status $NS_CONFIG_STANDBY_NIC ; do
+            	NS_CONFIG_STANDBY_NIC="$(set_new_nic $NS_CONFIG_STANDBY_NIC)"
+		    done
+            #####
+			
+            set_ifcfg_eth_file $NS_SRC_STANDBY_NIC $NS_CONFIG_STANDBY_NIC $APPROACH_BB_PATH
 			
 			echo "Standby NIC : $nic"
 			echo "New Standby NIC : $NS_CONFIG_STANDBY_NIC"
@@ -209,12 +292,18 @@ set_env_file $NS_NEW_CONFIG_PATH
 # Create Approach BA NS_Profile
 for bond in "${NS_BOND_LIST[@]}"; do
         read -r -a  NS_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
-        #echo "# of NIC : ${#NS_BOND_NIC[@]}"
+        #echo "# of NIC : ${#NS_BOND_NIC[@]}"                   #Debug use
         for nic in "${NS_BOND_NIC[@]}"; do
 
                 if grep -q "primary=$nic" "$NS_CONFIG_PATH""ifcfg-$bond" 2> /dev/null ; then
                         NS_SRC_ACTIVE_NIC=$nic
-                        NS_CONFIG_ACTIVE_NIC="$(set_new_nic $nic)"
+                		NS_CONFIG_ACTIVE_NIC="$(set_new_nic $nic)"
+            
+                        ##### add at 22-July-2025
+                        while check_nic_status $NS_CONFIG_ACTIVE_NIC ; do
+                            NS_CONFIG_ACTIVE_NIC="$(set_new_nic $NS_CONFIG_ACTIVE_NIC)"
+                        done
+                        #####
 
                         set_ifcfg_eth_file $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BA_PATH
                         set_ifcfg_bond_file $bond $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BA_PATH
@@ -225,6 +314,8 @@ for bond in "${NS_BOND_LIST[@]}"; do
         done
 done
 
+# Configur SELINUX attribute
 set_config_permission $APPROACH_AA_PATH
 set_config_permission $APPROACH_BB_PATH
 set_config_permission $APPROACH_BA_PATH
+

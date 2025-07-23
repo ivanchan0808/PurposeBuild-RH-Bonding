@@ -32,6 +32,24 @@ reload_service() {
 	fi
 }
 
+##### New added at 23-July for handling RHEL9 behavior-auto create Wired connection when the NICs are connected.
+delete_stale_connections() {
+    # Get all "Wired connection" names
+    nmcli -t -f NAME connection show | grep -E '^Wired connection' | while IFS= read -r conn; do
+        echo "Deleting connection: $conn"
+        nmcli connection delete "$conn"
+    done
+
+    for nic in "${ACTIVE_NIC_LIST[@]}"; do
+        nmcli connection delete $nic
+    done
+
+    for nic in "${STANDBY_NIC_LIST[@]}"; do
+        nmcli connection delete $nic
+    done
+}
+#####
+
 check_config() {
     local eth=$1
     if ip address show "$eth" | grep -iq "master bond*" ; then
@@ -76,15 +94,25 @@ if [ ! -d "${PROFILES_PATH}/backup/" ] ; then
 	mv $CONFIG_PATH "${PROFILES_PATH}/backup"
 fi
 
+if [ ! -d $PROFILE_FOLDER ] ; then
+	echo "The profile folder is not exist! The profile may be applied! "
+	exit 1
+fi
+
+
 if [ ! -d $CONFIG_PATH ] ; then
+    if [ $CONFIG_TYPE == "NM" ]; then
+	    delete_stale_connections
+    fi
 	mv -b $PROFILE_FOLDER $CONFIG_PATH
-#	chcon -Ru system_u -r object_r -t net_conf_t /etc/sysconfig/network-scripts/
 	reload_service $DAEMON_TYPE
 else 
-        mv $CONFIG_PATH $BACKUP_FOLDER
-        mv -b $PROFILE_FOLDER $CONFIG_PATH
-#        chcon -Ru system_u -r object_r -t net_conf_t /etc/sysconfig/network-scripts/
-        reload_service $DAEMON_TYPE
+    if [ $CONFIG_TYPE == "NM" ]; then
+	    delete_stale_connections
+    fi
+	mv $CONFIG_PATH $BACKUP_FOLDER
+    mv -b $PROFILE_FOLDER $CONFIG_PATH
+    reload_service $DAEMON_TYPE
 fi
 
 sleep 5
