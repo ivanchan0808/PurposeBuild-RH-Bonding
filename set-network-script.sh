@@ -1,13 +1,38 @@
 #!/bin/bash
 
-# ONLINE MODE VARS
+##### New add on 24-Jul-2025
+VERSION=`awk '{print $6}' /etc/redhat-release`
+if (( $(echo "$VERSION >= 8" | bc -l) )); then
+    USER="ps_syssupp"
+elif (( $(echo "$VERSION >= 7" | bc -l) )); then
+    USER="syssupp"
+fi
+
 SERVER=`hostname`
+LOG_PATH="/home/${USER}/otpc_log_${SERVER}/"
+
+if [ ! -d "/home/${USER}" ]; then
+    LOG_PATH="/tmp/otpc_log_${SERVER}/"
+    echo "${USER} is not exit!"
+    echo " LOG PATH change to ${LOG_PATH}!"
+    USER=`whoami`
+fi  
+
+if [ ! -d "$LOG_PATH" ]; then
+    echo "Creating log folder - $LOG_PATH"
+    mkdir -p $LOG_PATH
+fi
+
+LOG_DEBUG_FILE="${LOG_PATH}set-network-script.running.log"
+#####
+
+# ONLINE MODE VARS
 NS_CONFIG_PATH="/etc/sysconfig/network-scripts/"
-NS_NEW_CONFIG_PATH="/root/$SERVER/new_config/"
+NS_NEW_CONFIG_PATH="/root/otpc_net_${SERVER}/new_config/"
 
 # OFFLINE MODE VARS
 NS_CONFIG_PREFIX=$1
-NS_CONFIG_SUFFIX="tmp/network_backup_20250712_091735/network-scripts/network-scripts/"
+NS_LOG_FILE=""
 
 # COMMON VARS
 NS_SOURCE="ProfileAA/"
@@ -20,14 +45,16 @@ NS_SRC_ACTIVE_NIC=""
 NS_SRC_STANDBY_NIC=""
 NS_CONFIG_ACTIVE_NIC=""
 NS_CONFIG_STANDBY_NIC=""
+MODE=""                                                 #New add on 22-Jul-2025 for online/offline mode
+UP_NIC_LIST=""                                          #New add on 22-Jul-2025 for check_nic_status of offline mode=
+LAST_RUN_FOLDER="${NS_NEW_CONFIG_PATH}last_run/"        # New add on 25-Jul-2025 for new generated profile comparison
+DIFF_FILE="${LOG_PATH}diff.log"
 
 # Global var for create env_profile_file Only
 declare -a NS_SRC_STANDBY_NIC_LIST
 declare -a NS_SRC_ACTIVE_NIC_LIST
 declare -a NS_CONFIG_ACTIVE_NIC_LIST
 declare -a NS_CONFIG_STANDBY_NIC_LIST
-MODE=""                                         #New add at 22-Jul-2025 for online/offline mode
-UP_NIC_LIST=""                                  #New add at 22-Jul-2025 for check_nic_status of offline mode=
 
 get_bond_list() {
     local config_path="$1"
@@ -63,29 +90,36 @@ get_active_nic_from_bond() {
     local active_nic="none"
     
         if grep -l "primary=$nic" "$bond_config_file" 2> /dev/null ; then	
-	    active_nic="$nic"
+    	    active_nic="$nic"
         fi
 
     echo "$active_nic"
 }
 
-##### New add at 22-July-2025,
+##### New add on 22-July-2025,
 # if nic in used return true.
 check_nic_status()
 {
     local nic=$1
 
     if [[ $MODE == "online" ]]; then
-        if ip address show $nic | grep -iq "master bond*" ; then
+        echo "CHECK_NIC_STATUS() MODE == ONLINE" | tee -a $LOG_DEBUG_FILE
+        if ip address show $nic | grep -iq "master bond"*  ; then
+            echo "CHECK_NIC_STATUS() MODE=ONLINE RETURN : TRUE" | tee -a $LOG_DEBUG_FILE
             return 0
     	else
+            echo "CHECK_NIC_STATUS() MODE=ONLINE RETURN : FALSE"| tee -a $LOG_DEBUG_FILE
 	        return 1
     	fi
 
     elif [[ $MODE == "offline" ]]; then
+        echo "CHECK_NIC_STATUS() MODE == OFFLINE" | tee -a $LOG_DEBUG_FILE
+        echo "grep -i ${nic} ${UP_NIC_LIST}" | tee -a $LOG_DEBUG_FILE
         if grep -i $nic $UP_NIC_LIST ; then
+            echo "CHECK_NIC_STATUS() MODE=OFFLINE RETURN : TRUE" | tee -a $LOG_DEBUG_FILE
             return 0
         else
+            echo "CHECK_NIC_STATUS() MODE=OFFLINE RETURN : FALSE" | tee -a $LOG_DEBUG_FILE
             return 1
         fi	
         
@@ -120,13 +154,13 @@ set_new_nic() {
 
     # Case 3: Test ENV VM NIC on Linux e.g. ens192 -> ens 161; ens224 -> ens256
     elif [[ ${nic%%[0-9]*} == "ens" ]]; then
-        echo "in loop $nic" >> debug.txt
+        echo "in loop $nic" | tee -a $LOG_DEBUG_FILE
         if [[ $nic == "ens192" ]]; then
-            new_nic="ens161"
-            echo "$new_nic" >> debug.txt
+            new_nic="ens161" 
+            echo "$new_nic" | tee -a $LOG_DEBUG_FILE
         elif [[ $nic == "ens224" ]]; then
             new_nic="ens256"
-            echo "$new_nic" >> debug.txt
+            echo "$new_nic" | tee -a $LOG_DEBUG_FILE
         fi
     fi
 
@@ -180,71 +214,107 @@ set_env_file() {
 
 }
 
+leave_copy(){
+    echo "Copy Profile Folder to ${LOG_PATH}" | tee -a $LOG_DEDUG_FILE
+    cp -R $NS_NEW_CONFIG_PATH/* $LOG_PATH | tee -a $LOG_DEDUG_FILE
+    echo "chown $USER -R $LOG_PATH" | tee -a $LOG_DEDUG_FILE
+    chown $USER -R $LOG_PATH | tee -a $LOG_DEDUG_FILE
+    echo "chmod 755 -R $LOG_PATH" | tee -a $LOG_DEDUG_FILE
+    chmod 755 -R $LOG_PATH | tee -a $LOG_DEDUG_FILE
+}
+
+##### Add on 28-Jul-2025
+diff_last_run() {
+    local profile="Profile$1"
+    local config_files=$(find "$NS_NEW_CONFIG_PATH/$profile" -type f)
+
+    for filepath in $config_files; do
+        file=$(basename "$filepath")
+        echo "diff ${NS_NEW_CONFIG_PATH}/${profile}/${file} ${LAST_RUN_FOLDER}/${profile}/${file}" | tee -a "$DIFF_FILE" "$LOG_DEBUG_FILE"
+        diff "${NS_NEW_CONFIG_PATH}/${profile}/${file}" "${LAST_RUN_FOLDER}/${profile}/${file}" | tee -a "$DIFF_FILE" "$LOG_DEBUG_FILE"
+    done
+}
+##### 
+
 # Determine ONLINE/OFFLINE Mode. Modify date 22-Jul-2025
 if [ ! -z "$1" ]; then
     if [ -d "$1" ]; then
-	NS_CONFIG_PATH="$NS_CONFIG_PREFIX""$NS_CONFIG_SUFFIX"
-        NS_NEW_CONFIG_PATH="$NS_CONFIG_PREFIX""new_config/"
+	    NS_NEW_CONFIG_PATH="${NS_CONFIG_PREFIX}new_config/"
 
-	if grep -iq "TYPE=Bond" "$NS_CONFIG_PATH""ifcfg-bond"* 2>/dev/null; then
-            if [ -z "$2" ]; then
-                echo "No ip addr list file for verifying"
+        NS_CONFIG_PATH="$(dirname `find $NS_CONFIG_PREFIX -name "ifcfg-bond0"`)/"
+        NS_LOG_FILE=`find ${NS_CONFIG_PREFIX} -name network_info_*.log`
+
+        
+        MODE="offline"
+        echo "Script execute in OFFLINE mode!" | tee -a $LOG_DEBUG_FILE
+        echo "Config File Path : ${NS_CONFIG_PATH}" | tee -a $LOG_DEBUG_FILE
+        echo "IP ADDRESS LIST FILE : ${NS_LOG_FILE}" | tee -a $LOG_DEBUG_FILE
+
+
+        if grep -i "TYPE=Bond" "${NS_CONFIG_PATH}ifcfg-bond"* ; then
+        
+            if [[ ! -n "$NS_LOG_FILE" ]]; then
+                echo "No ip addr list file for verifying" MODE="offline" | tee -a $LOG_DEBUG_FILE
                 exit 1
             fi
-            
+        
             # Global variable for function call.
-            MODE="offline"                              
-            echo "Script execute in OFFLINE mode!"
-            echo "Config File Path : ${NS_CONFIG_PATH}"
-	    
-	    UP_NIC_LIST="${NS_CONFIG_PREFIX}/up_nic.txt"
- 	    grep -i "master bond" $2 > $UP_NIC_LIST
-	    cat $UP_NIC_LIST
+            UP_NIC_LIST="${NS_CONFIG_PREFIX}up_nic.txt"
 
-        else 
-            echo "No bonding configure file under this directory!"
+            grep -i "master bond" $NS_LOG_FILE > $UP_NIC_LIST;
+            echo "List out in used physical bond nic!" | tee -a $LOG_DEBUG_FILE
+            cat $UP_NIC_LIST | tee -a $LOG_DEBUG_FILE
+            echo "<< End of List >>" | tee -a $LOG_DEBUG_FILE
+
+         else   
+            echo "No bonding configure file under this directory!" | tee -a $LOG_DEBUG_FILE
             exit 1
         fi
     else
-        echo "$1 isn't exist!"
-            exit 1
+        echo "$1 isn't exist!" | tee -a $LOG_DEBUG_FILE
+        exit 1
     fi
 else
-        echo "Script execute in ONLINE mode!"
-        echo "Config File Path : ${NS_CONFIG_PATH}"
         MODE="online"
+        echo "Script execute in ONLINE mode!" | tee -a $LOG_DEBUG_FILE
+        echo "Config File Path : ${NS_CONFIG_PATH}" | tee -a $LOG_DEBUG_FILE
 fi
 
 # Create NS_Profile folder
 if [ ! -d "$NS_NEW_CONFIG_PATH" ]; then
     mkdir -p "$NS_NEW_CONFIG_PATH"
-else 
-    echo "The folder exists! Please clean up the folder to avoid overwrite actions."
+elif [[ -d "${NS_NEW_CONFIG_PATH}/ProfileBA" || -d "${NS_NEW_CONFIG_PATH}/ProfileBB" || -d "${NS_NEW_CONFIG_PATH}/ProfileAA" ]]; then
+    echo "The Profile(s) folder exists! Please clean up the folder to avoid overwrite actions." | tee -a $LOG_DEBUG_FILE
     exit 1
 fi
 
 APPROACH_AA_PATH="$NS_NEW_CONFIG_PATH""$NS_SOURCE"
+echo "Copying ${NS_CONFIG_PATH} to ${APPROACH_AA_PATH}........" | tee -a $LOG_DEBUG_FILE
 cp -Rp "$NS_CONFIG_PATH" "$APPROACH_AA_PATH"
 
 APPROACH_BA_PATH="$NS_NEW_CONFIG_PATH""$NS_CONFIG1"
+echo "Copying ${NS_CONFIG_PATH} to ${APPROACH_BA_PATH}........" | tee -a $LOG_DEBUG_FILE
 cp -Rp "$NS_CONFIG_PATH" "$APPROACH_BA_PATH"
 
 APPROACH_BB_PATH="$NS_NEW_CONFIG_PATH""$NS_CONFIG2"
+echo "Copying ${NS_CONFIG_PATH} to ${APPROACH_BB_PATH}........" | tee -a $LOG_DEBUG_FILE
 cp -Rp "$NS_CONFIG_PATH" "$APPROACH_BB_PATH"
 
 # Get Bond List
 MAIN_COPY_PATH=$APPROACH_AA_PATH
 
 read -r -a  NS_BOND_LIST <<< "$(get_bond_list $MAIN_COPY_PATH)"
-#echo "# of BOND : ${#NS_BOND_LIST[@]}"                         #Debug use
+echo "# of BOND : ${#NS_BOND_LIST[@]}" | tee -a $LOG_DEBUG_FILE                         #Debug use
 
 # Create Approach BB NS_Profile
 for bond in "${NS_BOND_LIST[@]}"; do
     	read -r -a  NS_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
-	#echo "# of NIC : ${#NS_BOND_NIC[@]}"                       #Debug use
+        echo "# of NIC : ${#NS_BOND_NIC[@]}" | tee -a $LOG_DEBUG_FILE                    #Debug use
+        echo "Approach BB-BOND: $bond" | tee -a $LOG_DEBUG_FILE
+
     	for nic in "${NS_BOND_NIC[@]}"; do
 	
-		if grep -q "primary=$nic" "$NS_CONFIG_PATH""ifcfg-$bond" 2> /dev/null ; then
+		if grep -iq "primary=$nic" "$NS_CONFIG_PATH""ifcfg-$bond" 2> /dev/null ; then
 			
             NS_SRC_ACTIVE_NIC=$nic
 			NS_CONFIG_ACTIVE_NIC="$(set_new_nic $nic)"
@@ -259,8 +329,8 @@ for bond in "${NS_BOND_LIST[@]}"; do
             set_ifcfg_eth_file $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 			set_ifcfg_bond_file $bond $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 			
-			echo "Active NIC : $nic"
-			echo "New Active NIC : $NS_CONFIG_ACTIVE_NIC"
+			echo "Active NIC : $nic" | tee -a $LOG_DEBUG_FILE
+			echo "New Active NIC : $NS_CONFIG_ACTIVE_NIC" | tee -a $LOG_DEBUG_FILE
 
                         NS_CONFIG_ACTIVE_NIC_LIST+=("$NS_CONFIG_ACTIVE_NIC")
                         NS_SRC_ACTIVE_NIC_LIST+=("$nic")
@@ -276,8 +346,8 @@ for bond in "${NS_BOND_LIST[@]}"; do
 			
             set_ifcfg_eth_file $NS_SRC_STANDBY_NIC $NS_CONFIG_STANDBY_NIC $APPROACH_BB_PATH
 			
-			echo "Standby NIC : $nic"
-			echo "New Standby NIC : $NS_CONFIG_STANDBY_NIC"
+			echo "Standby NIC : $nic" | tee -a $LOG_DEBUG_FILE
+			echo "New Standby NIC : $NS_CONFIG_STANDBY_NIC" | tee -a $LOG_DEBUG_FILE
 
                         NS_CONFIG_STANDBY_NIC_LIST+=("$NS_CONFIG_STANDBY_NIC")
                         NS_SRC_STANDBY_NIC_LIST+=("$nic")
@@ -292,10 +362,12 @@ set_env_file $NS_NEW_CONFIG_PATH
 # Create Approach BA NS_Profile
 for bond in "${NS_BOND_LIST[@]}"; do
         read -r -a  NS_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
-        #echo "# of NIC : ${#NS_BOND_NIC[@]}"                   #Debug use
+        echo "# of NIC : ${#NS_BOND_NIC[@]}" | tee -a $LOG_DEBUG_FILE                  #Debug use
+        echo "Approach BA-BOND: $bond" | tee -a $LOG_DEBUG_FILE
+
         for nic in "${NS_BOND_NIC[@]}"; do
 
-                if grep -q "primary=$nic" "$NS_CONFIG_PATH""ifcfg-$bond" 2> /dev/null ; then
+                if grep -iq "primary=$nic" "$NS_CONFIG_PATH""ifcfg-$bond" 2> /dev/null ; then
                         NS_SRC_ACTIVE_NIC=$nic
                 		NS_CONFIG_ACTIVE_NIC="$(set_new_nic $nic)"
             
@@ -308,8 +380,8 @@ for bond in "${NS_BOND_LIST[@]}"; do
                         set_ifcfg_eth_file $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BA_PATH
                         set_ifcfg_bond_file $bond $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BA_PATH
 
-                        echo "Active NIC : $nic"
-                        echo "New Active NIC : $NS_CONFIG_ACTIVE_NIC"
+                        echo "Active NIC : $nic" | tee -a $LOG_DEBUG_FILE
+                        echo "New Active NIC : $NS_CONFIG_ACTIVE_NIC" | tee -a $LOG_DEBUG_FILE
                 fi
         done
 done
@@ -319,3 +391,20 @@ set_config_permission $APPROACH_AA_PATH
 set_config_permission $APPROACH_BB_PATH
 set_config_permission $APPROACH_BA_PATH
 
+##### Add on 28-Jul-2025
+if [ $MODE=="online" ]; then
+    leave_copy
+        if [ -d "${LAST_RUN_FOLDER}ProfileAA" ]; then
+            echo "${LAST_RUN_FOLDER}ProfileAA exist, start comparing the config file!"
+            diff_last_run AA
+        fi
+        if [ -d "${LAST_RUN_FOLDER}ProfileBA" ]; then
+            echo "${LAST_RUN_FOLDER}ProfileBA exist, start comparing the config file!"
+            diff_last_run BA
+        fi
+        if [ -d "${LAST_RUN_FOLDER}ProfileBB" ]; then
+            echo "${LAST_RUN_FOLDER}ProfileBB exist, start comparing the config file!"
+            diff_last_run BB
+        fi
+fi
+#####

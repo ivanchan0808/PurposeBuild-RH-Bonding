@@ -1,13 +1,36 @@
 #!/bin/bash
 
-# ONLINE MODE VARS
+##### New add on 24-Jul-2025
+VERSION=`awk '{print $6}' /etc/redhat-release`
+if (( $(echo "$VERSION >= 8" | bc -l) )); then
+    USER="ps_syssupp"
+elif (( $(echo "$VERSION >= 7" | bc -l) )); then
+    USER="syssupp"
+fi
+
 SERVER=`hostname`
+LOG_PATH="/home/${USER}/otpc_log_${SERVER}/"
+
+if [ ! -d "/home/${USER}" ]; then
+    LOG_PATH="/tmp/otpc_log_${SERVER}/"
+    echo "${USER} is not exit!"
+    echo " LOG PATH change to ${LOG_PATH}!"
+    USER=`whoami`
+fi  
+
+if [ ! -d "$LOG_PATH" ]; then
+    echo "Creating log folder - $LOG_PATH"
+    mkdir -p $LOG_PATH
+fi
+
+LOG_DEBUG_FILE="${LOG_PATH}set-network-manager.running.log"
+#####
+
 NM_CONFIG_PATH="/etc/NetworkManager/system-connections/"
-NM_NEW_CONFIG_PATH="/root/$SERVER/new_config/"
+NM_NEW_CONFIG_PATH="/root/otpc_net_${SERVER}/new_config/"
 
 # OFFLINE MODE VARS
 NM_CONFIG_PREFIX=$1
-NM_CONFIG_SUFFIX="tmp/network_backup_20250712_091735/network-scripts/network-scripts/"
 
 # COMMON VARS
 NM_SOURCE="ProfileAA/"
@@ -20,14 +43,17 @@ NM_SRC_ACTIVE_NIC=""
 NM_SRC_STANDBY_NIC=""
 NM_CONFIG_ACTIVE_NIC=""
 NM_CONFIG_STANDBY_NIC=""
+MODE=""                                                 # New add on 22-Jul-2025 for online/offline mode
+UP_NIC_LIST=""                                          # New add on 22-Jul-2025 for check_nic_status of offline mode
+LAST_RUN_FOLDER="${NM_NEW_CONFIG_PATH}last_run/"        # New add on 25-Jul-2025 for new generated profile comparison
+DIFF_FILE="${LOG_PATH}diff.log"
 
 # Global var for create env_profile_file Only
 declare -a NM_SRC_STANDBY_NIC_LIST
 declare -a NM_SRC_ACTIVE_NIC_LIST
 declare -a NM_CONFIG_ACTIVE_NIC_LIST
 declare -a NM_CONFIG_STANDBY_NIC_LIST
-declare -a MODE                                                 #New add at 22-Jul-2025 for online/offline mode
-declare -a UP_NIC_LIST                                          #New add at 22-Jul-2025 for check_nic_status of offline mode
+
 
 get_bond_list() {
     local config_path="$1"
@@ -50,10 +76,11 @@ get_bond_nic_list() {
 
     while read -r filepath; do
         file=$(echo "$filepath" | sed 's|.*/||')                # remove path
-        ethernet_name=${file%.nmconnection}                     # remove prefix
+        ethernet_name=${file%.nmconnection}                     # remove file extension name
         ethernet_array+=("$ethernet_name")
-    done < <(grep -il "type=ethernet" "$config_path"/*.nmconnection | xargs grep -il master=$bond 2> /dev/null)
-
+    ##### Change on 24-Jul-2025, using controller=$bond instead of master=$bond
+    done < <(grep -il "type=ethernet" "$config_path"/*.nmconnection | xargs grep -il controller=$bond 2> /dev/null)  
+    #####
     echo "${ethernet_array[@]}"
 }
 
@@ -69,7 +96,7 @@ get_active_nic_from_bond() {
     echo "$active_nic"
 }
 
-##### New add at 22-July-2025,
+##### New add on 22-July-2025,
 # if nic in used return true.
 check_nic_status()
 {
@@ -200,73 +227,106 @@ set_env_file() {
 
 }
 
+leave_copy(){
+    echo "Copy Profile Folder to ${LOG_PATH}" | tee -a $LOG_DEDUG_FILE
+    cp -R $NM_NEW_CONFIG_PATH/* $LOG_PATH | tee -a $LOG_DEDUG_FILE
+    echo "chown $USER -R $LOG_PATH" | tee -a $LOG_DEDUG_FILE
+    chown $USER -R $LOG_PATH | tee -a $LOG_DEDUG_FILE
+    echo "chmod 755 -R $LOG_PATH" | tee -a $LOG_DEDUG_FILE
+    chmod 755 -R $LOG_PATH | tee -a $LOG_DEDUG_FILE
+}
+
+diff_last_run() {
+    local profile="Profile$1"
+    local config_files=$(find "$NM_NEW_CONFIG_PATH/$profile" -type f)
+
+    for filepath in $config_files; do
+        file=$(basename "$filepath")
+        echo "diff ${NM_NEW_CONFIG_PATH}/${profile}/${file} ${LAST_RUN_FOLDER}/${profile}/${file}" | tee -a "$DIFF_FILE" "$LOG_DEBUG_FILE"
+        diff "${NM_NEW_CONFIG_PATH}/${profile}/${file}" "${LAST_RUN_FOLDER}/${profile}/${file}" | tee -a "$DIFF_FILE" "$LOG_DEBUG_FILE"
+    done
+}
+
 ##### Determine ONLINE/OFFLINE Mode. Modify date 22-Jul-2025
 if [ ! -z "$1" ]; then
     if [ -d "$1" ]; then
-	NM_CONFIG_PATH="$NM_CONFIG_PREFIX""$NM_CONFIG_SUFFIX"
+	
         NM_NEW_CONFIG_PATH="$NM_CONFIG_PREFIX""new_config/"
+        NM_CONFIG_PATH="$(dirname `find $NM_CONFIG_PREFIX -name "bond0.nmconnection"`)/"
+        NM_LOG_FILE=`find ${NM_CONFIG_PREFIX} -name network_info_*.log`
 
-	if grep -iq "TYPE=Bond" "$NM_CONFIG_PATH""ifcfg-bond"* 2>/dev/null; then
-            if [ -z "$2" ]; then
-                echo "No ip addr list file for verifying"
+        MODE="offline"
+        echo "Script execute in OFFLINE mode!" | tee -a $LOG_DEBUG_FILE
+        echo "Config File Path : ${NM_CONFIG_PATH}" | tee -a $LOG_DEBUG_FILE
+        echo "IP ADDRESS LIST FILE : ${NM_LOG_FILE}" | tee -a $LOG_DEBUG_FILE
+	
+        if grep -i "TYPE=Bond" "${NM_CONFIG_PATH}bond0.nmconnection" ; then
+        
+            if [[ ! -n "$NM_LOG_FILE" ]]; then
+                echo "No ip addr list file for verifying" MODE="offline" | tee -a $LOG_DEBUG_FILE
                 exit 1
             fi
-            
+        
             # Global variable for function call.
-            MODE="offline"                              
-            echo "Script execute in OFFLINE mode!"
-            echo "Config File Path : ${NM_CONFIG_PATH}"
-	    
-	    UP_NIC_LIST="${NM_CONFIG_PREFIX}/up_nic.txt"
- 	    grep -i "master bond" $2 > $UP_NIC_LIST
-	    cat $UP_NIC_LIST
+            UP_NIC_LIST="${NM_CONFIG_PREFIX}up_nic.txt"
+
+            grep -i "master bond" $NM_LOG_FILE > $UP_NIC_LIST;
+            echo "List out in used physical bond nic!" | tee -a $LOG_DEBUG_FILE
+            cat $UP_NIC_LIST | tee -a $LOG_DEBUG_FILE
+            echo "<< End of List >>" | tee -a $LOG_DEBUG_FILE
 
         else 
-            echo "No bonding configure file under this directory!"
+            echo "No bonding configure file under this directory!" | tee -a $LOG_DEBUG_FILE
             exit 1
         fi
     else
-        echo "$1 isn't exist!"
+        echo "$1 isn't exist!" | tee -a $LOG_DEBUG_FILE
         exit 1
     fi
 else
-        echo "Script execute in ONLINE mode!"
-        echo "Config File Path : ${NM_CONFIG_PATH}"
         MODE="online"
+        echo "Script execute in ONLINE mode!" | tee -a $LOG_DEBUG_FILE
+        echo "Config File Path : ${NM_CONFIG_PATH}" | tee -a $LOG_DEBUG_FILE
 fi
+
 #####
 
 # Create NM_Profile
 if [ ! -d "$NM_NEW_CONFIG_PATH" ]; then
     mkdir -p "$NM_NEW_CONFIG_PATH"
-else 
-    echo "The folder exists! Please clean up the folder to avoid overwrite actions."
+elif [[ -d "${NM_NEW_CONFIG_PATH}/ProfileBA" || -d "${NM_NEW_CONFIG_PATH}/ProfileBB" || -d "${NM_NEW_CONFIG_PATH}/ProfileAA" ]]; then
+    echo "The Profile(s) folder exists! Please clean up the folder to avoid overwrite actions." | tee -a $LOG_DEBUG_FILE
     exit 1
 fi
 
 APPROACH_AA_PATH="$NM_NEW_CONFIG_PATH""$NM_SOURCE"
+echo "Copying ${NM_CONFIG_PATH} to ${APPROACH_AA_PATH}........" | tee -a $LOG_DEBUG_FILE
 cp -Rp "$NM_CONFIG_PATH" "$APPROACH_AA_PATH"
 
 APPROACH_BA_PATH="$NM_NEW_CONFIG_PATH""$NM_CONFIG1"
+echo "Copying ${NM_CONFIG_PATH} to ${APPROACH_BA_PATH}........" | tee -a $LOG_DEBUG_FILE
 cp -Rp "$NM_CONFIG_PATH" "$APPROACH_BA_PATH"
 
 APPROACH_BB_PATH="$NM_NEW_CONFIG_PATH""$NM_CONFIG2"
+echo "Copying ${NM_CONFIG_PATH} to ${APPROACH_BB_PATH}........" | tee -a $LOG_DEBUG_FILE
 cp -Rp "$NM_CONFIG_PATH" "$APPROACH_BB_PATH"
 
 # Get Bond List
 MAIN_COPY_PATH=$APPROACH_AA_PATH
 
 read -r -a  NM_BOND_LIST <<< "$(get_bond_list $MAIN_COPY_PATH)"
-#echo "# of BOND : ${#NM_BOND_LIST[@]}"                             # Debug use
+echo "# of BOND : ${#NM_BOND_LIST[@]}" | tee -a $LOG_DEBUG_FILE        # Debug use
 
 # Create Approach BB NM_Profile
 for bond in "${NM_BOND_LIST[@]}"; do
-    	read -r -a  NM_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
-	#echo "# of NIC : ${#NM_BOND_NIC[@]}"                           # Debug use
-	#echo " Approach BB-BOND: $bond"                                # Debug use
-    	for nic in "${NM_BOND_NIC[@]}"; do
-			
-		if grep -q "primary=$nic" "$NM_CONFIG_PATH""$bond"".nmconnection" 2> /dev/null ; then
+    read -r -a  NM_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
+	echo " Approach BB-BOND: $bond" | tee -a $LOG_DEBUG_FILE                               # Debug use
+    echo "# of NIC : ${#NM_BOND_NIC[@]}" | tee -a $LOG_DEBUG_FILE                           # Debug use
+    	
+    for nic in "${NM_BOND_NIC[@]}"; do
+
+        echo "${nic} belongs to ${bond}" | tee -a $LOG_DEBUG_FILE
+		if grep -iq "primary=$nic" "$NM_CONFIG_PATH""$bond"".nmconnection" 2> /dev/null ; then
 			NM_SRC_ACTIVE_NIC=$nic
 			NM_CONFIG_ACTIVE_NIC="$(set_new_nic $nic)"
 
@@ -280,8 +340,8 @@ for bond in "${NM_BOND_LIST[@]}"; do
 			set_nm_eth_file $NM_SRC_ACTIVE_NIC $NM_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 			set_nm_bond_file $bond $NM_SRC_ACTIVE_NIC $NM_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 			
-			#echo "Active NIC : $nic"                               # debug use
-			#echo "New Active NIC : $NM_CONFIG_ACTIVE_NIC"          # debug use
+			echo "Active NIC : $nic" | tee -a $LOG_DEBUG_FILE                               # debug use
+			echo "New Active NIC : $NM_CONFIG_ACTIVE_NIC" | tee -a $LOG_DEBUG_FILE          # debug use
 
 			NM_CONFIG_ACTIVE_NIC_LIST+=("$NM_CONFIG_ACTIVE_NIC")
 			NM_SRC_ACTIVE_NIC_LIST+=("$nic")
@@ -291,8 +351,8 @@ for bond in "${NM_BOND_LIST[@]}"; do
 
 			set_nm_eth_file $NM_SRC_STANDBY_NIC $NM_CONFIG_STANDBY_NIC $APPROACH_BB_PATH
 			
-			#echo "Standby NIC : $nic"                              # debug use
-			#echo "New Standby NIC : $NM_CONFIG_STANDBY_NIC"        # debug use    
+			echo "Standby NIC : $nic" | tee -a $LOG_DEBUG_FILE                             # debug use
+			echo "New Standby NIC : $NM_CONFIG_STANDBY_NIC" | tee -a $LOG_DEBUG_FILE       # debug use    
 
 			NM_CONFIG_STANDBY_NIC_LIST+=("$NM_CONFIG_STANDBY_NIC")
 			NM_SRC_STANDBY_NIC_LIST+=("$nic")
@@ -309,12 +369,12 @@ set_env_file $NM_NEW_CONFIG_PATH
 # Create Approach BA NM_Profile
 for bond in "${NM_BOND_LIST[@]}"; do
         read -r -a  NM_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
-        #echo "# of NIC : ${#NM_BOND_NIC[@]}"
-	    #echo "Approach BA-BOND: $bond"
+        echo "# of NIC : ${#NM_BOND_NIC[@]}" | tee -a $LOG_DEBUG_FILE
+	    echo "Approach BA-BOND: $bond" | tee -a $LOG_DEBUG_FILE
 
         for nic in "${NM_BOND_NIC[@]}"; do
 
-                if grep -q "primary=$nic" "$NM_CONFIG_PATH""$bond"".nmconnection" 2> /dev/null ; then
+                if grep -iq "primary=$nic" "$NM_CONFIG_PATH""$bond"".nmconnection" 2> /dev/null ; then
                         NM_SRC_ACTIVE_NIC=$nic
                         NM_CONFIG_ACTIVE_NIC="$(set_new_nic $nic)"
 
@@ -328,8 +388,8 @@ for bond in "${NM_BOND_LIST[@]}"; do
                         set_nm_eth_file $NM_SRC_ACTIVE_NIC $NM_CONFIG_ACTIVE_NIC $APPROACH_BA_PATH
                         set_nm_bond_file $bond $NM_SRC_ACTIVE_NIC $NM_CONFIG_ACTIVE_NIC $APPROACH_BA_PATH
 
-                        #echo "Active NIC : $nic"                                   # debug use
-                        #echo "New Active NIC : $NM_CONFIG_ACTIVE_NIC"              # debug use
+                        echo "Active NIC : $nic" | tee -a $LOG_DEBUG_FILE                                  # debug use
+                        echo "New Active NIC : $NM_CONFIG_ACTIVE_NIC" | tee -a $LOG_DEBUG_FILE            # debug use
                 fi
         done
 done
@@ -337,3 +397,20 @@ done
 set_config_permission $APPROACH_AA_PATH
 set_config_permission $APPROACH_BB_PATH
 set_config_permission $APPROACH_BA_PATH
+
+if [ $MODE=="online" ]; then
+    leave_copy
+        if [ -d "${LAST_RUN_FOLDER}ProfileAA" ]; then
+            echo "${LAST_RUN_FOLDER}ProfileAA exist, start comparing the config file!" | tee -a $LOG_DEBUG_FILE
+            diff_last_run AA
+        fi
+        if [ -d "${LAST_RUN_FOLDER}ProfileBA" ]; then
+            echo "${LAST_RUN_FOLDER}ProfileBA exist, start comparing the config file!" | tee -a $LOG_DEBUG_FILE
+            diff_last_run BA
+        fi
+        if [ -d "${LAST_RUN_FOLDER}ProfileBB" ]; then
+            echo "${LAST_RUN_FOLDER}ProfileBB exist, start comparing the config file!" | tee -a $LOG_DEBUG_FILE
+            diff_last_run BB 
+        fi
+fi
+
