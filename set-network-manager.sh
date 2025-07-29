@@ -148,13 +148,10 @@ set_new_nic() {
 
     # Case 3: Test ENV VM NIC on Linux e.g. ens192 -> ens 161; ens224 -> ens256
     elif [[ ${nic%%[0-9]*} == "ens" ]]; then
-        echo "in loop $nic" >> debug.txt
         if [[ $nic == "ens192" ]]; then
             new_nic="ens161"
-            echo "$new_nic" >> debug.txt
         elif [[ $nic == "ens224" ]]; then
             new_nic="ens256"
-            echo "$new_nic" >> debug.txt
         fi
     fi
 

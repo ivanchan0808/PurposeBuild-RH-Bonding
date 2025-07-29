@@ -154,13 +154,10 @@ set_new_nic() {
 
     # Case 3: Test ENV VM NIC on Linux e.g. ens192 -> ens 161; ens224 -> ens256
     elif [[ ${nic%%[0-9]*} == "ens" ]]; then
-        echo "in loop $nic" | tee -a $LOG_DEBUG_FILE
         if [[ $nic == "ens192" ]]; then
             new_nic="ens161" 
-            echo "$new_nic" | tee -a $LOG_DEBUG_FILE
         elif [[ $nic == "ens224" ]]; then
             new_nic="ens256"
-            echo "$new_nic" | tee -a $LOG_DEBUG_FILE
         fi
     fi
 
@@ -322,11 +319,25 @@ for bond in "${NS_BOND_LIST[@]}"; do
             ##### add at 22-July-2025
             while check_nic_status $NS_CONFIG_ACTIVE_NIC ; do
                     NS_CONFIG_ACTIVE_NIC="$(set_new_nic $NS_CONFIG_ACTIVE_NIC)"
-            # echo "in loop : ${NS_CONFIG_ACTIVE_NIC}"          # Debug use
+                    echo "in while loop : ${NS_CONFIG_ACTIVE_NIC}"          # Debug use
             done
             #####
-			
+            echo "==========================================="
+			echo "Call function : set_ifcfg_eth_file()"
+            echo "Original Active NIC: ${NS_SRC_ACTIVE_NIC}"
+            echo "New Active NIC: ${NS_CONFIG_ACTIVE_NIC}"
+            echo "Approach BB Path : ${APPROACH_BB_PATH}"
+            echo "==========================================="
+
             set_ifcfg_eth_file $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
+
+            echo "==========================================="
+			echo "Call function : set_ifcfg_bond_file()"
+            echo "bond : ${bond}"
+            echo "Original Active NIC: ${NS_SRC_ACTIVE_NIC}"
+            echo "New Active NIC: ${NS_CONFIG_ACTIVE_NIC}"
+            echo "Approach BB Path : ${APPROACH_BB_PATH}"
+            echo "==========================================="
 			set_ifcfg_bond_file $bond $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 			
 			echo "Active NIC : $nic" | tee -a $LOG_DEBUG_FILE
