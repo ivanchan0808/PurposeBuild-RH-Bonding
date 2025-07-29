@@ -25,6 +25,7 @@ fi
 
 LOG_DEBUG_FILE="${LOG_PATH}check_all_ping_latency.running.log"
 OUTPUT_FILE="${LOG_PATH}check_all_ping_latency.log"
+echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
 #####
 
 # The filename cannot be changed. 
@@ -138,3 +139,5 @@ for logfile in "${PING_LOG_FILES[@]}"; do
 		echo "${log_file} not exist!" | tee $OUTPUT_FILE | tee -a $LOG_DEBUG_FILE
 	fi
 done
+
+echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE

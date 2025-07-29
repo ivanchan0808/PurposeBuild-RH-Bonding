@@ -25,6 +25,7 @@ if [ ! -d "$LOG_PATH" ]; then
 fi
 
 LOG_DEBUG_FILE="${LOG_PATH}change_profile.running.log"
+echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
 #####
 
 PROFILES_PATH=$1						    	#The path store all the profiles
@@ -219,3 +220,5 @@ else
     echo "Write ${PROFILE_NAME} to RUNNING_PROFILE_FILE" | tee -a $LOG_DEBUG_FILE
     echo "export LAST_RUN_PROFILE=${PROFILE_NAME}" | tee $RUNNING_PROFILE_FILE | tee -a $LOG_DEBUG_FILE
 fi
+
+echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE

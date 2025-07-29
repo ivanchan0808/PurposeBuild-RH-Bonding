@@ -24,6 +24,7 @@ if [ ! -d "$LOG_PATH" ]; then
 fi
 
 LOG_DEBUG_FILE="${LOG_PATH}set-network-manager.running.log"
+echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
 #####
 
 NM_CONFIG_PATH="/etc/NetworkManager/system-connections/"
@@ -411,3 +412,4 @@ if [ $MODE=="online" ]; then
         fi
 fi
 
+echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE

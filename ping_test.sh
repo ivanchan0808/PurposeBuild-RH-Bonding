@@ -24,6 +24,7 @@ if [ ! -d "$LOG_PATH" ]; then
 fi
 
 LOG_DEBUG_FILE="${LOG_PATH}ping_test.running.log"
+echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
 #####
 
 GATEWAY_FILE="${LOG_PATH}gateway_ips.txt"
@@ -65,8 +66,6 @@ if [[ -z "$1" || -z "$2" ]]; then
     echo "Usage: $0 <Profiles Path> <Profile Name>"
     exit 1
 fi
-
-echo "==============================Start running ping_test $(date)==============================" | tee -a $LOG_DEBUG_FILE
 
 if [ -f $_ENV_FILE_ ]; then
     echo "Import  ${_ENV_FILE_} ....................." | tee -a $LOG_DEBUG_FILE

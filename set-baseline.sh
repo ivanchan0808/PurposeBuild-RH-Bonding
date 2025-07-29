@@ -24,6 +24,7 @@ if [ ! -d "$LOG_PATH" ]; then
 fi
 
 LOG_DEBUG_FILE="${LOG_PATH}set-baseline.running.log"
+echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
 #####
 
 GATEWAY_FILE="${LOG_PATH}/gateway_ips.txt"
@@ -59,3 +60,5 @@ ping_gateways "${LOG_PATH}/original_ping.log" |tee -a $LOG_DEBUG_FILE
 echo "Create IP Route baseline............. " |tee -a $LOG_DEBUG_FILE
 ip route | tee "${LOG_PATH}/original_route.log" |tee -a $LOG_DEBUG_FILE
 echo " ================== Exit script $(date) ==================" |tee -a $LOG_DEBUG_FILE
+
+echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE

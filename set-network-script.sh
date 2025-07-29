@@ -24,6 +24,7 @@ if [ ! -d "$LOG_PATH" ]; then
 fi
 
 LOG_DEBUG_FILE="${LOG_PATH}set-network-script.running.log"
+echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
 #####
 
 # ONLINE MODE VARS
@@ -319,25 +320,25 @@ for bond in "${NS_BOND_LIST[@]}"; do
             ##### add at 22-July-2025
             while check_nic_status $NS_CONFIG_ACTIVE_NIC ; do
                     NS_CONFIG_ACTIVE_NIC="$(set_new_nic $NS_CONFIG_ACTIVE_NIC)"
-                    echo "in while loop : ${NS_CONFIG_ACTIVE_NIC}"          # Debug use
+                    #echo "in while loop : ${NS_CONFIG_ACTIVE_NIC}"          # Debug use
             done
             #####
-            echo "==========================================="
-			echo "Call function : set_ifcfg_eth_file()"
-            echo "Original Active NIC: ${NS_SRC_ACTIVE_NIC}"
-            echo "New Active NIC: ${NS_CONFIG_ACTIVE_NIC}"
-            echo "Approach BB Path : ${APPROACH_BB_PATH}"
-            echo "==========================================="
+            #echo "==========================================="
+			#echo "Call function : set_ifcfg_eth_file()"
+            #echo "Original Active NIC: ${NS_SRC_ACTIVE_NIC}"
+            #echo "New Active NIC: ${NS_CONFIG_ACTIVE_NIC}"
+            #echo "Approach BB Path : ${APPROACH_BB_PATH}"
+            #echo "==========================================="
 
             set_ifcfg_eth_file $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 
-            echo "==========================================="
-			echo "Call function : set_ifcfg_bond_file()"
-            echo "bond : ${bond}"
-            echo "Original Active NIC: ${NS_SRC_ACTIVE_NIC}"
-            echo "New Active NIC: ${NS_CONFIG_ACTIVE_NIC}"
-            echo "Approach BB Path : ${APPROACH_BB_PATH}"
-            echo "==========================================="
+            #echo "==========================================="
+			#echo "Call function : set_ifcfg_bond_file()"
+            #echo "bond : ${bond}"
+            #echo "Original Active NIC: ${NS_SRC_ACTIVE_NIC}"
+            #echo "New Active NIC: ${NS_CONFIG_ACTIVE_NIC}"
+            #echo "Approach BB Path : ${APPROACH_BB_PATH}"
+            #echo "==========================================="
 			set_ifcfg_bond_file $bond $NS_SRC_ACTIVE_NIC $NS_CONFIG_ACTIVE_NIC $APPROACH_BB_PATH
 			
 			echo "Active NIC : $nic" | tee -a $LOG_DEBUG_FILE
@@ -419,3 +420,4 @@ if [ $MODE=="online" ]; then
         fi
 fi
 #####
+echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE
