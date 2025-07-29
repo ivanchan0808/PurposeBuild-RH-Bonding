@@ -15,27 +15,25 @@ if [ ! -d "/home/${USER}" ]; then
     LOG_PATH="/tmp/otpc_log_${SERVER}/"
     echo "${USER} is not exit!"
     echo " LOG PATH change to ${LOG_PATH}!"
-    USER=`whoami`
-fi  
+fi
 
 if [ ! -d "$LOG_PATH" ]; then
-    echo "Creating log folder - ${LOG_PATH}."
+    echo "Creating log folder - $LOG_PATH"
     mkdir -p $LOG_PATH
 fi
 
 LOG_DEBUG_FILE="${LOG_PATH}check_all_ping_latency.running.log"
 OUTPUT_FILE="${LOG_PATH}check_all_ping_latency.log"
-echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
+echo "==============================Exit script $(date)===============================" | tee -a $LOG_DEBUG_FILE
 #####
 
-# The filename cannot be changed. 
 PING_LOG_FILES=("ProfileAA_ping_by_active-nic.log" "ProfileAA_ping_by_standby-nic.log" "ProfileBA_ping_by_active-nic.log" "ProfileBA_ping_by_standby-nic.log" "ProfileBB_ping_by_active-nic.log" "ProfileBB_ping_by_standby-nic.log")
 LATENCY_THRESHOLD=3.0
 
 check_latency_block() {
     local ip="$1"
     local profile="$2"
-    local b="$3"
+    local b=$3
     local nic="$4"
     local latency_list=()
     local unreachable=0
@@ -53,12 +51,12 @@ check_latency_block() {
         # Check if 100% packet loss
 
         if  [[ "$line" =~ 100%\ packet\ loss ]]; then
-	    unreachable=1
+            unreachable=1
         fi
 
         # End of current block
 #        if [[ "$line" == "--- $ip ping statistics ---" ]]; then
-	if [[ "$line" =~ packets\ transmitted ]]; then
+        if [[ "$line" =~ packets\ transmitted ]]; then
             break
         fi
     done
@@ -69,7 +67,7 @@ check_latency_block() {
 
 
     if [[ "$unreachable" -eq 1 ]]; then
-        echo "${profile} : Using ${b} - ${nic} to ping $ip: Unreachable" 
+        echo "${profile} : Using ${b} - ${nic} to ping $ip: Unreachable"
         return
     fi
 
@@ -91,7 +89,7 @@ check_latency_block() {
     done
 
     if [[ "$last3_high_count" -eq 3 ]]; then
-        #echo "$ip: High latency"               ##### Change on 24-Jul-2025 : Disabled High latency return 
+        #echo "$ip: High latency"               ##### Change on 24-Jul-2025 : Disabled High latency return
         ##### Change on 25-Jul-2025 : Show the Profile and NIC to ping the IP.
         echo "${profile} : Using ${b} - ${nic} to ping $ip: Normal"
     else
@@ -103,7 +101,8 @@ check_latency_block() {
 extract_bond(){
     local network="${1%.*}"
     local bond=""
-        
+#    echo "Extracted Network ${network}" | tee -a "$LOG_DEBUG_FILE"
+
     bond=$(grep -i "$network".0/ "${LOG_PATH}original_route.log" | awk '
         ($2 == "dev") { print $3 }
         ($2 == "via") { print $5 }
@@ -114,7 +113,7 @@ extract_bond(){
 
 # Main loop: parse blocks per IP
 for logfile in "${PING_LOG_FILES[@]}"; do
-	log_file="${LOG_PATH}${logfile}"
+        log_file="${LOG_PATH}${logfile}"
     ##### Change on 25-Jul-2025 : Show the Profile and NIC to ping the IP.
     if [[ "$logfile" =~ ^([^_]+)_([^_]+)_([^_]+)_([^_]+)\.log$ ]]; then
         running_profile="${BASH_REMATCH[1]}"    # ProfileAA
@@ -125,19 +124,19 @@ for logfile in "${PING_LOG_FILES[@]}"; do
     fi
     #####
 
-	if [ -f "$log_file" ] ; then 
-		echo "Checking $log_file .........." | tee $OUTPUT_FILE | tee -a $LOG_DEBUG_FILE
-		while read -r line; do
-		    if [[ "$line" =~ ^PING[[:space:]]([0-9.]+)[[:space:]] ]]; then
-        		ip="${BASH_REMATCH[1]}"
+        if [ -f "$log_file" ] ; then
+                echo "Checking $log_file .........." | tee $OUTPUT_FILE | tee -a $LOG_DEBUG_FILE
+                while read -r line; do
+                    if [[ "$line" =~ ^PING[[:space:]]([0-9.]+)[[:space:]] ]]; then
+                        ip="${BASH_REMATCH[1]}"
                 ##### Change on 25-Jul-2025 : Show the Profile and NIC to ping the IP.
-                running_bond="${extract_bond "$ip"}"
-		        check_latency_block "$ip" $running_profile $running_bond $running_nic | tee $OUTPUT_FILE | tee -a $LOG_DEBUG_FILE
-		    fi
-		done < "$log_file"
-	else
-		echo "${log_file} not exist!" | tee $OUTPUT_FILE | tee -a $LOG_DEBUG_FILE
-	fi
+                running_bond="$(extract_bond $ip)"
+                        check_latency_block "$ip" $running_profile $running_bond $running_nic | tee $OUTPUT_FILE |tee -a $LOG_DEBUG_FILE
+                    fi
+                done < "$log_file"
+        else
+                echo "$log_file not exist!" | tee $OUTPUT_FILE |tee -a $LOG_DEBUG_FILE
+        fi
 done
 
-echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE
+echo "==============================Exit script $(date)===============================" | tee -a $LOG_DEBUG_FILE
