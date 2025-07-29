@@ -50,7 +50,6 @@ ping_gateways() {
     done < "$GATEWAY_FILE"
 }
 
-echo " ================== Start running set-baseline on $(date) ==================" |tee -a $LOG_DEBUG_FILE
 echo " Extract ip route gateway........ " |tee -a $LOG_DEBUG_FILE
 extract_gateway_ips |tee -a $LOG_DEBUG_FILE
 
@@ -59,6 +58,6 @@ ping_gateways "${LOG_PATH}/original_ping.log" |tee -a $LOG_DEBUG_FILE
 
 echo "Create IP Route baseline............. " |tee -a $LOG_DEBUG_FILE
 ip route | tee "${LOG_PATH}/original_route.log" |tee -a $LOG_DEBUG_FILE
-echo " ================== Exit script $(date) ==================" |tee -a $LOG_DEBUG_FILE
+
 
 echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE
