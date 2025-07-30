@@ -24,7 +24,7 @@ if [ ! -d "$LOG_PATH" ]; then
 fi
 
 LOG_DEBUG_FILE="${LOG_PATH}set-network-script.running.log"
-echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
+echo "========================Start running script $(date)========================" | tee -a $LOG_DEBUG_FILE
 #####
 
 # ONLINE MODE VARS
@@ -238,10 +238,13 @@ diff_last_run() {
 if [ ! -z "$1" ]; then
     if [ -d "$1" ]; then
 	    NS_NEW_CONFIG_PATH="${NS_CONFIG_PREFIX}new_config/"
+        echo "Mode=OFFLINE LOG Path change to ${NS_CONFIG_PREFIX}set-network-script.running.log" | tee -a $LOG_DEBUG_FILE
+        LOG_DEBUG_FILE="${NS_CONFIG_PREFIX}set-network-script.running.log"
+        echo "Log Path changed $(date)=============================================" | tee -a $LOG_DEBUG_FILE        
 
         NS_CONFIG_PATH="$(dirname `find $NS_CONFIG_PREFIX -name "ifcfg-bond0"`)/"
         NS_LOG_FILE=`find ${NS_CONFIG_PREFIX} -name network_info_*.log`
-
+        LAST_RUN_FOLDER="${NS_NEW_CONFIG_PATH}last_run/"
         
         MODE="offline"
         echo "Script execute in OFFLINE mode!" | tee -a $LOG_DEBUG_FILE
@@ -307,8 +310,9 @@ echo "# of BOND : ${#NS_BOND_LIST[@]}" | tee -a $LOG_DEBUG_FILE                 
 # Create Approach BB NS_Profile
 for bond in "${NS_BOND_LIST[@]}"; do
     	read -r -a  NS_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
-        echo "# of NIC : ${#NS_BOND_NIC[@]}" | tee -a $LOG_DEBUG_FILE                    #Debug use
+        echo "===========================================================================" | tee -a $LOG_DEBUG_FILE
         echo "Approach BB-BOND: $bond" | tee -a $LOG_DEBUG_FILE
+        echo "# of NIC : ${#NS_BOND_NIC[@]}" | tee -a $LOG_DEBUG_FILE                    #Debug use
 
     	for nic in "${NS_BOND_NIC[@]}"; do
 	
@@ -374,9 +378,10 @@ set_env_file $NS_NEW_CONFIG_PATH
 # Create Approach BA NS_Profile
 for bond in "${NS_BOND_LIST[@]}"; do
         read -r -a  NS_BOND_NIC <<< "$(get_bond_nic_list $MAIN_COPY_PATH $bond)"
-        echo "# of NIC : ${#NS_BOND_NIC[@]}" | tee -a $LOG_DEBUG_FILE                  #Debug use
+        echo "===========================================================================" | tee -a $LOG_DEBUG_FILE
         echo "Approach BA-BOND: $bond" | tee -a $LOG_DEBUG_FILE
-
+        echo "# of NIC : ${#NS_BOND_NIC[@]}" | tee -a $LOG_DEBUG_FILE                  #Debug use
+        
         for nic in "${NS_BOND_NIC[@]}"; do
 
                 if grep -iq "primary=$nic" "$NS_CONFIG_PATH""ifcfg-$bond" 2> /dev/null ; then
@@ -398,13 +403,16 @@ for bond in "${NS_BOND_LIST[@]}"; do
         done
 done
 
-# Configur SELINUX attribute
-set_config_permission $APPROACH_AA_PATH
-set_config_permission $APPROACH_BB_PATH
-set_config_permission $APPROACH_BA_PATH
+
 
 ##### Add on 28-Jul-2025
-if [ $MODE=="online" ]; then
+if [[ $MODE == "online" ]]; then
+    echo "===========================================================================" | tee -a $LOG_DEBUG_FILE
+    # Configur SELINUX attribute
+    set_config_permission $APPROACH_AA_PATH
+    set_config_permission $APPROACH_BB_PATH
+    set_config_permission $APPROACH_BA_PATH
+
     leave_copy
         if [ -d "${LAST_RUN_FOLDER}ProfileAA" ]; then
             echo "${LAST_RUN_FOLDER}ProfileAA exist, start comparing the config file!"
@@ -420,4 +428,4 @@ if [ $MODE=="online" ]; then
         fi
 fi
 #####
-echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE
+echo "==============================Exit script $(date)===============================" | tee -a $LOG_DEBUG_FILE
