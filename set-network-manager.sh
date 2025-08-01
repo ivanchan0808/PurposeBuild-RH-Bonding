@@ -276,8 +276,14 @@ set_env_file() {
 }
 
 leave_copy(){
-    echo "Copy Profile Folder to ${LOG_PATH}" | tee -a $LOG_DEDUG_FILE
-    cp -R $NM_NEW_CONFIG_PATH/* $LOG_PATH | tee -a $LOG_DEDUG_FILE
+    local copy_path="${LOG_PATH}leave_copy_$(date +%Y%m%d_%H%M%S)/"
+    mkdir -p $copy_path
+
+    echo "Create tar backup ${NM_CONFIG_PATH} ========="
+    tar cvf "${copy_path}system-connections.tar" $NM_CONFIG_PATH
+
+    echo "Copy Profile Folder to ${copy_path}" | tee -a $LOG_DEDUG_FILE
+    cp -R $NM_NEW_CONFIG_PATH/* $copy_path | tee -a $LOG_DEDUG_FILE
     echo "chown $USER -R $LOG_PATH" | tee -a $LOG_DEDUG_FILE
     chown $USER -R $LOG_PATH | tee -a $LOG_DEDUG_FILE
     echo "chmod 755 -R $LOG_PATH" | tee -a $LOG_DEDUG_FILE

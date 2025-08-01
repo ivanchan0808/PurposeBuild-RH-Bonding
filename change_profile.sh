@@ -25,7 +25,7 @@ if [ ! -d "$LOG_PATH" ]; then
 fi
 
 LOG_DEBUG_FILE="${LOG_PATH}change_profile.running.log"
-echo "========================Start running script $(date)========================" | tee -a LOG_DEBUG_FILE
+echo "========================Start running script $(date)========================" | tee -a $LOG_DEBUG_FILE
 #####
 
 PROFILES_PATH=$1						    	#The path store all the profiles
@@ -42,9 +42,10 @@ RUNNING_PROFILE_FILE="${PROFILES_PATH}env_last_run_profile"
 LAST_RUN_FOLDER="${PROFILES_PATH}last_run/"
 LAST_RUN_PROFILE=""
 
-if [ "$2" == "backup" ]; then
-        PROFILE_NAME="ProfileAA"
-fi
+
+#if [ "$2" == "backup" ]; then
+#        PROFILE_NAME="ProfileAA"
+#fi
 
 echo "IMPORT ENV FILE : ${PROFILE_NAME}" | tee -a $LOG_DEBUG_FILE
 source $PROFILES_PATH/env_"$PROFILE_NAME"_file
@@ -109,6 +110,7 @@ rename_last_run_folder(){
     fi
 }
 
+
 if [[ -z "$1" || -z "$2" ]]; then
     echo "Usage: $0 <Profiles Path> <Profile Name>" | tee -a $LOG_DEBUG_FILE
     exit 1
@@ -139,37 +141,37 @@ echo "CONFIG_PATH : ${CONFIG_PATH}" | tee -a $LOG_DEBUG_FILE
 echo "DAEMON_TYPE : ${DAEMON_TYPE}" | tee -a $LOG_DEBUG_FILE
 
 
-if [[ $2 == "backup" ]] ; then
-	PROFILE_FOLDER=$1"backup"
-    echo "Restore the Backup................." | tee -a $LOG_DEBUG_FILE
-fi
+#if [[ $2 == "backup" ]] ; then
+#	PROFILE_FOLDER=$1"backup"
+#    echo "Restore the Backup................." | tee -a $LOG_DEBUG_FILE
+#fi
 
-if [ ! -d "${PROFILES_PATH}/backup/" ] ; then
-	echo "Backup $CONFIG_PATH to $PROFILE_PATH..........." | tee -a $LOG_DEBUG_FILE
-	mv $CONFIG_PATH "${PROFILES_PATH}/backup"
-fi
+#if [ ! -d "${PROFILES_PATH}/backup/" ] ; then
+#	echo "Backup $CONFIG_PATH to $PROFILE_PATH..........." | tee -a $LOG_DEBUG_FILE
+#	mv $CONFIG_PATH "${PROFILES_PATH}/backup"
+#fi
 
-if [ ! -d $PROFILE_FOLDER ] ; then
+if [[ ! -d $PROFILE_FOLDER ]] ; then
 	echo "The profile folder is not exist! The profile may be applied! "  | tee -a $LOG_DEBUG_FILE
     exit 1
 fi
 
 ##### Added on 25-Jul-2025, for config comparison
-if [ ! -d "$LAST_RUN_FOLDER" ] ; then
+if [[ ! -d "$LAST_RUN_FOLDER" ]] ; then
 	echo "Create last_run folder ${LAST_RUN_FOLDER}..........." | tee -a $LOG_DEBUG_FILE
 	mkdir -p $LAST_RUN_FOLDER
 fi
 #####
 
-if [ ! -d $CONFIG_PATH ] ; then
-    if [ $CONFIG_TYPE == "NM" ]; then
+if [[ ! -d $CONFIG_PATH ]] ; then
+    if [[ $CONFIG_TYPE == "NM" ]]; then
 	    delete_stale_connections
     fi
     echo "Moving ${PROFILE_FOLDER} setting to ${CONFIG_PATH}"  | tee -a $LOG_DEBUG_FILE
 	mv -b $PROFILE_FOLDER $CONFIG_PATH
     reload_service $DAEMON_TYPE
 else 
-##### Added on 25-Jul-2025, for config comparison    
+    ##### Added on 25-Jul-2025, for config comparison    
     if [[ -f $RUNNING_PROFILE_FILE ]]; then
         echo "${RUNNING_PROFILE_FILE} is exist! Running profile : ${LAST_RUN_PROFILE}"  | tee -a $LOG_DEBUG_FILE
         if [[ $LAST_RUN_PROFILE == "ProfileAA" || $LAST_RUN_PROFILE == "ProfileBA" || $LAST_RUN_PROFILE == "ProfileBB" ]]; then
@@ -181,8 +183,13 @@ else
     else
         echo "${RUNNING_PROFILE_FILE} is not exist!"  | tee -a $LOG_DEBUG_FILE
     fi
+
+    if [[ -d "${CONFIG_PATH}" ]] ; then
+	    echo "Move $CONFIG_PATH to $LAST_RUN_FOLDER..........." | tee -a $LOG_DEBUG_FILE
+	    mv $CONFIG_PATH "${LAST_RUN_FOLDER}/config_snapshot_$(date +%Y%m%d_%H%M%S)"
+    fi
 #####
-    if [ $CONFIG_TYPE == "NM" ]; then
+    if [[ $CONFIG_TYPE == "NM" ]]; then
 	    delete_stale_connections
     fi
     
@@ -212,13 +219,13 @@ for nic in "${STANDBY_NIC_LIST[@]}"; do
     fi
 done
 
-if [[ $2 == "backup" ]]; then
+#if [[ $2 == "backup" ]]; then
     ##### Add on 28-Jul-2025, rename the env_last_run_profile
-    echo "Move and rename ${RUNNING_PROFILE_FILE} to ${LAST_RUN_FOLDER}env_last_run_profile_${LAST_RUN_SUFFIX}" | tee -a $LOG_DEBUG_FILE
-    mv $RUNNING_PROFILE_FILE "${LAST_RUN_FOLDER}env_last_run_profile_${LAST_RUN_SUFFIX}"
-else 
-    echo "Write ${PROFILE_NAME} to RUNNING_PROFILE_FILE" | tee -a $LOG_DEBUG_FILE
+#    echo "Move and rename ${RUNNING_PROFILE_FILE} to ${LAST_RUN_FOLDER}env_last_run_profile_${LAST_RUN_SUFFIX}" | tee -a $LOG_DEBUG_FILE
+#    mv $RUNNING_PROFILE_FILE "${LAST_RUN_FOLDER}env_last_run_profile_${LAST_RUN_SUFFIX}"
+#else 
+    echo "Write ${PROFILE_NAME} to ${RUNNING_PROFILE_FILE}" | tee -a $LOG_DEBUG_FILE
     echo "export LAST_RUN_PROFILE=${PROFILE_NAME}" | tee $RUNNING_PROFILE_FILE | tee -a $LOG_DEBUG_FILE
-fi
+#fi
 
-echo "==============================Exit script $(date)===============================" | tee -a LOG_DEBUG_FILE
+echo "==============================Exit script $(date)===============================" | tee -a $LOG_DEBUG_FILE
